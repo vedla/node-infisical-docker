@@ -1,0 +1,64 @@
+name: Release images
+
+# Mirrors the GitLab release pipeline (.gitlab-ci.yml) so the GitHub mirror publishes its own
+# images and release once GitLab pushes a tag here. Keep the NODE_VERSION matrix below in sync
+# with the one in .gitlab-ci.yml.
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node_version:
+          - '22-slim' # Maintenance LTS
+          - '24-slim' # Active LTS
+          - '25-slim' # Current
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        env:
+          NODE_VERSION: ${{ matrix.node_version }}
+        run: |
+          NODE_TAG="${NODE_VERSION%-slim}"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg NODE_VERSION="$NODE_VERSION" \
+            --tag "ghcr.io/${{ github.repository }}:node-$NODE_TAG" \
+            --tag "ghcr.io/${{ github.repository }}:${{ github.ref_name }}-node-$NODE_TAG" \
+            --push .
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build-images
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" --generate-notes

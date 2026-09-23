@@ -143,6 +143,12 @@ set), not on every commit to `main`:
 To cut a release: update the `NODE_VERSION` matrix in `.gitlab-ci.yml` if the set of versions to
 build needs to change, then push a tag (e.g. `git tag v1.2.0 && git push origin v1.2.0`).
 
+GitLab automatically mirrors pushes (including tags) to the [GitHub mirror](https://gitlab.com/vedla/node-infisical-docker).
+[`.github/workflows/release.yml`](.github/workflows/release.yml) picks up that tag and runs the
+equivalent flow there: builds the same `NODE_VERSION` matrix, pushes multi-platform images to
+`ghcr.io/vedla/node-infisical-docker`, and creates the matching GitHub Release. **Keep the `NODE_VERSION`
+matrix in both files in sync** — there's no shared source between them.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes and test them locally.
