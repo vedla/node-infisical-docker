@@ -1,93 +1,163 @@
 # Node Infisical Docker Image
 
+[![pipeline status](https://gitlab.com/vedla/node-infisical-docker/badges/main/pipeline.svg)](https://gitlab.com/vedla/node-infisical-docker/-/commits/main)
+[![coverage report](https://gitlab.com/vedla/node-infisical-docker/badges/main/coverage.svg)](https://gitlab.com/vedla/node-infisical-docker/-/commits/main)
+[![Latest Release](https://gitlab.com/vedla/node-infisical-docker/-/badges/release.svg)](https://gitlab.com/vedla/node-infisical-docker/-/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+A multi-platform Docker image that wraps the official [`node`](https://hub.docker.com/_/node)
+image with the [Infisical CLI](https://infisical.com/docs/cli/overview), so a container can
+authenticate to Infisical via [universal auth](https://infisical.com/docs/documentation/platform/identities/universal-auth)
+and run your Node.js process with a valid `INFISICAL_TOKEN` already exported — no secrets baked
+into the image or passed around as plaintext build args.
 
-## Getting started
+## How it works
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+The entrypoint ([`entrypoint.sh`](entrypoint.sh)) runs before your command:
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+1. Validates that `INFISICAL_DOMAIN`, `INFISICAL_CLIENT_ID`, and `INFISICAL_CLIENT_SECRET` are set.
+2. Logs in to Infisical using universal auth and captures a short-lived token.
+3. Exports the token as `INFISICAL_TOKEN`.
+4. `exec`s the container's command (e.g. `node server.js`, `npm start`), so your app can use the
+   [Infisical Node SDK](https://infisical.com/docs/sdks/languages/node) or the `infisical run`
+   wrapper to fetch secrets at runtime.
 
-## Add your files
+## Prerequisites
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+- [Docker](https://docs.docker.com/get-docker/) with [Buildx](https://docs.docker.com/buildx/working-with-buildx/)
+  for multi-platform builds.
+- An Infisical [machine identity](https://infisical.com/docs/documentation/platform/identities/universal-auth)
+  configured for universal auth, giving you a client ID and client secret.
 
+## Building the image
+
+Build and publish one multi-platform image for AMD64 and ARM64. Set `NODE_VERSION` once so it
+controls both the Node base image and the tag:
+
+```sh
+NODE_VERSION=24.13.0-slim
+IMAGE=ghcr.io/vedla/node-infisical
+
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --build-arg NODE_VERSION="$NODE_VERSION" \
+  --tag "$IMAGE:node-${NODE_VERSION%-slim}" \
+  --push .
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/vedla/node-infisical-docker.git
-git branch -M main
-git push -uf origin main
+
+The example publishes the tag `node-24.13.0`. `--push` publishes one tag containing both platform
+variants. Use `--load` instead only for a single local platform.
+
+### Build arguments
+
+| Argument       | Default             | Description                                   |
+| -------------- | -------------------- | ---------------------------------------------- |
+| `NODE_VERSION` | `24.13.0-slim`        | Tag of the [`node`](https://hub.docker.com/_/node) base image to build from. |
+
+## Running the image
+
+Run the image by providing `INFISICAL_DOMAIN`, `INFISICAL_CLIENT_ID`, and
+`INFISICAL_CLIENT_SECRET`:
+
+```sh
+docker run --rm \
+  -e INFISICAL_DOMAIN \
+  -e INFISICAL_CLIENT_ID \
+  -e INFISICAL_CLIENT_SECRET \
+  "$IMAGE:node-24.13.0" node --version
 ```
 
-## Integrate with your tools
+### Environment variables
 
-* [Set up project integrations](https://gitlab.com/vedla/node-infisical-docker/-/settings/integrations)
+| Variable                   | Required | Description                                                        |
+| --------------------------- | -------- | -------------------------------------------------------------------- |
+| `INFISICAL_DOMAIN`          | Yes      | Base URL of your Infisical instance (e.g. `https://app.infisical.com`). |
+| `INFISICAL_CLIENT_ID`       | Yes      | Universal auth client ID for the machine identity.                    |
+| `INFISICAL_CLIENT_SECRET`   | Yes      | Universal auth client secret for the machine identity.                |
+| `INFISICAL_TOKEN`           | Set by entrypoint | Short-lived access token exported for your process to consume. Do not set this yourself. |
 
-## Collaborate with your team
+Pass credentials via your orchestrator's secret store (e.g. Docker/Swarm secrets, Kubernetes
+secrets, CI/CD masked variables) rather than plaintext environment files.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Extending this image
 
-## Test and Deploy
+Use it as a base image and let the inherited `ENTRYPOINT` handle Infisical auth for you — just
+add your app and set `CMD` (or pass a command at `docker run` time), don't override `ENTRYPOINT`:
 
-Use the built-in continuous integration in GitLab.
+```dockerfile
+FROM ghcr.io/vedla/node-infisical-docker:node-24.13.0
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+# WORKDIR /app and the entrypoint are inherited; just add your app on top.
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
 
-***
+# Optional: drop root and run as the non-root user the base image already created.
+USER appuser
 
-# Editing this README
+CMD ["node", "server.js"]
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Build and run it the same way as any other image; the base image's `ENTRYPOINT` still runs first,
+authenticates with Infisical, and then `exec`s your `CMD`:
 
-## Suggestions for a good README
+```sh
+docker build -t my-app .
+docker run --rm \
+  -e INFISICAL_DOMAIN \
+  -e INFISICAL_CLIENT_ID \
+  -e INFISICAL_CLIENT_SECRET \
+  -p 3000:3000 \
+  my-app
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Notes for sub-images:
 
-## Name
-Choose a self-explaining name for your project.
+- `WORKDIR /app` and `appuser`/`nodejs` (uid/gid `1001`) are already set up by the base image; add
+  `USER appuser` yourself if you want to run as that user instead of root.
+- `NODE_VERSION` is baked into the tag you `FROM` — pin to a specific `node-<version>` tag rather
+  than relying on a mutable one, so your build doesn't shift under you.
+- If you need Infisical to inject secrets as files or additional env vars (not just
+  `INFISICAL_TOKEN`), wrap your `CMD` with [`infisical run --`](https://infisical.com/docs/cli/commands/run)
+  instead of calling your process directly.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## CI/CD
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+[`.gitlab-ci.yml`](.gitlab-ci.yml) runs on every pipeline:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- **SAST** and **Secret Detection** ([GitLab templates](https://docs.gitlab.com/user/application_security/))
+  scan the repository for vulnerabilities and committed secrets.
+- **`build-check`** runs `docker build` (single-platform, no push) on every branch push to catch a
+  broken `Dockerfile` before release. It also drives the coverage badge above — there's no test
+  suite here, so it reports 100% when the build succeeds and 0% when it fails.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Images are only built and published **when a release tag is pushed** (i.e. `$CI_COMMIT_TAG` is
+set), not on every commit to `main`:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+- **`build-images`** runs once per Node version listed in its `parallel: matrix` (currently the
+  Maintenance LTS, Active LTS, and Current lines) and pushes a multi-platform image to
+  `$CI_REGISTRY_IMAGE`, tagged as `node-<version>` and `<tag>-node-<version>`.
+- **`release`** runs after all matrix builds succeed and creates the corresponding
+  [GitLab Release](https://gitlab.com/vedla/node-infisical-docker/-/releases) for the tag.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+To cut a release: update the `NODE_VERSION` matrix in `.gitlab-ci.yml` if the set of versions to
+build needs to change, then push a tag (e.g. `git tag v1.2.0 && git push origin v1.2.0`).
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes and test them locally.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Changelog
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+[MIT](LICENSE)
+
+## Repository Information
+
+GitHub is used for public releases, discussions, and community contributions.
+
+Development infrastructure, CI/CD, and internal tooling are managed through [GitLab](https://gitlab.com/vedla/node-infisical-docker)
+
