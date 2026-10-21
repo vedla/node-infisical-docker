@@ -17,10 +17,16 @@ The entrypoint ([`entrypoint.sh`](entrypoint.sh)) runs before your command:
 
 1. Validates that `INFISICAL_DOMAIN`, `INFISICAL_CLIENT_ID`, and `INFISICAL_CLIENT_SECRET` are set.
 2. Logs in to Infisical using universal auth and captures a short-lived token.
-3. Exports the token as `INFISICAL_TOKEN`.
+3. Exports the token as `INFISICAL_TOKEN` and removes `INFISICAL_CLIENT_ID` and
+   `INFISICAL_CLIENT_SECRET` from the environment, so your process never sees the long-lived
+   credential.
 4. `exec`s the container's command (e.g. `node server.js`, `npm start`), so your app can use the
    [Infisical Node SDK](https://infisical.com/docs/sdks/languages/node) or the `infisical run`
    wrapper to fetch secrets at runtime.
+
+[tini](https://github.com/krallin/tini) runs as PID 1 in front of the entrypoint. It passes
+`SIGTERM` from `docker stop` on to your process and reaps zombie processes, so containers shut
+down promptly whether your command is `node`, `npm`, or `infisical run -- node`.
 
 ## Prerequisites
 
@@ -92,7 +98,10 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
-# Optional: drop root and run as the non-root user the base image already created.
+# Files copied as root stay read-only to appuser. Make writable only what the app writes to.
+RUN mkdir -p .cache && chown appuser:nodejs .cache
+
+# Run as the non-root user the base image already created.
 USER appuser
 
 CMD ["node", "server.js"]
@@ -113,8 +122,12 @@ docker run --rm \
 
 Notes for sub-images:
 
-- `WORKDIR /app` and `appuser`/`nodejs` (uid/gid `1001`) are already set up by the base image; add
-  `USER appuser` yourself if you want to run as that user instead of root.
+- `WORKDIR /app` and `appuser`/`nodejs` (uid/gid `1001`) are already set up by the base image.
+  `/app` is owned by root. Copy your app in as root (no `--chown`), give `appuser` write access
+  only to the directories it writes to (for example Next.js's `.next/cache`), and end with
+  `USER appuser`. A process that cannot write to its own code cannot be made to rewrite it.
+- Keep the inherited `ENTRYPOINT`. If you must override it, keep tini first:
+  `ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/infisical-entrypoint"]`.
 - `NODE_VERSION` is baked into the tag you `FROM` — pin to a specific `node-<version>` tag rather
   than relying on a mutable one, so your build doesn't shift under you.
 - If you need Infisical to inject secrets as files or additional env vars (not just
@@ -131,14 +144,41 @@ Notes for sub-images:
   broken `Dockerfile` before release. It also drives the coverage badge above — there's no test
   suite here, so it reports 100% when the build succeeds and 0% when it fails.
 
-Images are only built and published **when a release tag is pushed** (i.e. `$CI_COMMIT_TAG` is
-set), not on every commit to `main`:
+Images are built and published **when a release tag is pushed** (i.e. `$CI_COMMIT_TAG` is set)
+and **on a weekly schedule**, not on every commit to `main`:
 
 - **`build-images`** runs once per Node version listed in its `parallel: matrix` (currently the
-  Maintenance LTS, Active LTS, and Current lines) and pushes a multi-platform image to
-  `$CI_REGISTRY_IMAGE`, tagged as `node-<version>` and `<tag>-node-<version>`.
+  Maintenance LTS, Active LTS, and Current lines). It calls
+  [`scripts/build-and-push.sh`](scripts/build-and-push.sh), which builds from a freshly pulled
+  base image, smoke-tests it (`node`, `infisical`, `tini`, and `curl` run; `/app` is owned by
+  root), and only then pushes a multi-platform image to `$CI_REGISTRY_IMAGE`.
 - **`release`** runs after all matrix builds succeed and creates the corresponding
   [GitLab Release](https://gitlab.com/vedla/node-infisical-docker/-/releases) for the tag.
+
+### Tags
+
+| Tag                       | Pushed by                | Changes after it is pushed?              |
+| ------------------------- | ------------------------ | ---------------------------------------- |
+| `node-<version>`          | Releases and schedules   | Yes, every rebuild. Use to get fixes.    |
+| `node-<version>-YYYYMMDD` | Releases and schedules   | No. Pin one to roll back a bad rebuild.  |
+| `<tag>-node-<version>`    | Releases only            | No.                                      |
+
+### Scheduled rebuilds
+
+Release tags are frozen, so security fixes in the `node:*-slim` base image (Debian packages, Node
+patch releases) and new Infisical CLI versions only reach users through the moving
+`node-<version>` tags. A weekly rebuild keeps those current:
+
+- **GitLab:** create the schedule under **Build → Pipeline schedules** (for example `0 4 * * 1`,
+  target branch `main`). A scheduled pipeline runs `build-images` only; it skips `build-check`
+  and never creates a release.
+- **GitHub:** the workflow has a `schedule` trigger (Mondays 04:00 UTC) and a manual **Run
+  workflow** button (`workflow_dispatch`). GitHub runs schedules only on the default branch and
+  disables them after 60 days without repository activity, so check the Actions tab if the mirror
+  goes quiet.
+
+Images built on this one only get the fixes when they are rebuilt themselves, so schedule their
+rebuilds after this one.
 
 To cut a release: update the `NODE_VERSION` matrix in `.gitlab-ci.yml` if the set of versions to
 build needs to change, then push a tag (e.g. `git tag v1.2.0 && git push origin v1.2.0`).
@@ -151,7 +191,8 @@ matrix in both files in sync** — there's no shared source between them.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes and test them locally.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to propose changes, test
+them locally, and disclose AI-assisted work.
 
 ## Changelog
 

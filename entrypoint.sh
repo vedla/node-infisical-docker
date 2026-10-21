@@ -18,6 +18,8 @@ if ! INFISICAL_TOKEN="$(
   exit 1
 fi
 
+# The client ID and secret are a long-lived credential; the app only needs the short-lived token.
+unset INFISICAL_CLIENT_ID INFISICAL_CLIENT_SECRET
 export INFISICAL_TOKEN
 echo "[SUCCESS] Authenticated with Infisical."
 exec "$@"

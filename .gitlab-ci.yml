@@ -37,15 +37,21 @@ build-check:
   rules:
     - if: '$CI_COMMIT_TAG'
       when: never
+    # Scheduled runs build and smoke-test in build-images instead.
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
     - when: on_success
   script:
     - until docker info >/dev/null 2>&1; do echo "waiting for docker daemon..."; sleep 1; done
     - 'docker build --build-arg NODE_VERSION=24-slim -t node-infisical:build-check . && echo "Build check: 100%" || (echo "Build check: 0%" && exit 1)'
   coverage: '/Build check: (\d+)%/'
 
-# Runs once per Node version whenever a release tag is pushed (see the `release` job below).
-# Update this matrix when preparing a release to control which Node versions get built —
-# check https://nodejs.org/en/about/previous-releases for the current LTS schedule.
+# Runs once per Node version whenever a release tag is pushed (see the `release` job below), and
+# on the weekly pipeline schedule (Build → Pipeline schedules, on `main`) so the moving `node-XX`
+# tags pick up Debian, Node, and Infisical CLI security fixes between releases. Scheduled runs never
+# touch the `<tag>-node-XX` release tags. Update this matrix when preparing a release to control
+# which Node versions get built — check https://nodejs.org/en/about/previous-releases for the
+# current LTS schedule. Keep it in sync with .github/workflows/release.yml.
 build-images:
   image: docker:24.0.2
   stage: build
@@ -70,18 +76,10 @@ build-images:
     - docker run --privileged --rm tonistiigi/binfmt --install all
     - docker buildx create --name multiarch --use || docker buildx use multiarch
     - docker buildx inspect --bootstrap
-    - |
-      NODE_TAG="${NODE_VERSION%-slim}"
-      docker buildx build \
-        --platform linux/amd64,linux/arm64 \
-        --provenance=false \
-        --sbom=false \
-        --build-arg NODE_VERSION="$NODE_VERSION" \
-        --tag "$CI_REGISTRY_IMAGE:node-$NODE_TAG" \
-        --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG-node-$NODE_TAG" \
-        --push .
+    - sh scripts/build-and-push.sh "$CI_REGISTRY_IMAGE" "$NODE_VERSION" "${CI_COMMIT_TAG:-}"
   rules:
     - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 # Creates the GitLab Release entry for the tag once every image in the matrix above has built.
 release:

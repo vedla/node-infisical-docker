@@ -1,6 +1,8 @@
 # Contributing
 
-Thanks for taking the time to contribute.
+Thanks for taking the time to contribute. Contributions are welcome: bug fixes, new Node versions,
+documentation, CI improvements, and reports of anything that looks wrong. If you are planning a
+larger change, open an issue first so we can agree on the approach.
 
 ## Getting started
 
@@ -30,6 +32,26 @@ Thanks for taking the time to contribute.
   requesting review. Never commit real Infisical credentials, tokens, or `.env` files.
 - Update `README.md` and `CHANGELOG.md` when your change affects usage, build args, or required
   environment variables.
+
+## AI policy
+
+AI-assisted contributions are allowed. You are still the author, so you are responsible for every
+line you submit.
+
+- **Disclose it.** In the merge request (or pull request on the GitHub mirror), say which tool you
+  used (for example Claude Code, GitHub Copilot, or Cursor), which model (for example Claude Opus
+  5.5 or GPT-5), and what you used it for.
+- **Review and understand it.** Read every change before you submit it, and be ready to explain
+  any part of it. Prompting a tool and submitting what comes back without reviewing it is not a
+  contribution.
+- **Explain why.** Tell us why the change is needed and why it is done this way, not only what it
+  does.
+- **Write the description yourself.** The title and description must be written by a person, not
+  generated. Code, tests, and commit messages can be AI-assisted; the description is where you
+  show that you understand the change.
+
+Requests that skip the disclosure, or whose author cannot explain the change, may be closed. The
+merge request and pull request templates have a section for this.
 
 ## Reporting issues
 
