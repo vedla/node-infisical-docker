@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+echo "[INFO] Authenticating with Infisical..."
+
 : "${INFISICAL_DOMAIN:?INFISICAL_DOMAIN is required}"
 : "${INFISICAL_CLIENT_ID:?INFISICAL_CLIENT_ID is required}"
 : "${INFISICAL_CLIENT_SECRET:?INFISICAL_CLIENT_SECRET is required}"
