@@ -3,13 +3,11 @@ ARG NODE_VERSION=24.13.0-slim
 FROM node:${NODE_VERSION} AS infisical-runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash curl wget ca-certificates tini zsh \
+    && apt-get install -y --no-install-recommends bash curl wget ca-certificates tini \
     && curl -1sLf https://artifacts-cli.infisical.com/setup.deb.sh | bash \
     && apt-get update \
     && apt-get install -y --no-install-recommends infisical \
     && rm -rf /var/lib/apt/lists/*
-
-SHELL ["/bin/zsh", "-c"]
 
 WORKDIR /app
 
